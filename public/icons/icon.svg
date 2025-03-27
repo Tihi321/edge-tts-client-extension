@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Speaker icon with sound waves -->
+  <rect width="128" height="128" rx="24" fill="#4285f4" />
+  
+  <!-- Speaker base -->
+  <rect x="36" y="52" width="16" height="24" rx="2" fill="white" />
+  
+  <!-- Speaker cone -->
+  <path d="M52 44L76 28V100L52 84V44Z" fill="white" />
+  
+  <!-- Sound wave 1 -->
+  <path d="M84 48C92 56 92 72 84 80" stroke="white" stroke-width="4" fill="none" stroke-linecap="round" />
+  
+  <!-- Sound wave 2 -->
+  <path d="M92 40C104 52 104 76 92 88" stroke="white" stroke-width="4" fill="none" stroke-linecap="round" />
+</svg> 

@@ -1,0 +1,31 @@
+{
+  "name": "edge-tts-client-extension",
+  "version": "1.0.0",
+  "description": "Chrome/Edge extension for connecting to a local Edge TTS server",
+  "main": "index.js",
+  "scripts": {
+    "build": "webpack --config webpack.config.js",
+    "watch": "webpack --config webpack.config.js --watch"
+  },
+  "dependencies": {
+    "typescript": "^5.0.4"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.312",
+    "@types/node": "^18.16.0",
+    "@types/webpack": "^5.28.1",
+    "copy-webpack-plugin": "^11.0.0",
+    "ts-loader": "^9.4.2",
+    "webpack": "^5.80.0",
+    "webpack-cli": "^5.0.2"
+  },
+  "keywords": [
+    "extension",
+    "edge-tts",
+    "chrome",
+    "edge"
+  ],
+  "repository": "git@github.com:Tihi321/edge-tts-client-extension.git",
+  "author": "Tihomir Selak <tknox.dr@gmail.com>",
+  "license": "MIT"
+}
