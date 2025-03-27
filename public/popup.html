@@ -5,7 +5,7 @@
   <title>Edge TTS Client</title>
   <style>
     body {
-      width: 250px;
+      width: 300px;
       padding: 10px;
       font-family: Arial, sans-serif;
     }
@@ -18,6 +18,7 @@
       display: flex;
       flex-direction: column;
       gap: 5px;
+      width: 100%;
     }
     input {
       padding: 5px;
@@ -34,21 +35,35 @@
       border-radius: 4px;
       cursor: pointer;
       transition: background-color 0.3s;
+      white-space: nowrap;
     }
     button:hover {
       background-color: #3367d6;
+    }
+    button.stop {
+      background-color: #f44336;
+    }
+    button.stop:hover {
+      background-color: #d32f2f;
+    }
+    button.play {
+      background-color: #4caf50;
+    }
+    button.play:hover {
+      background-color: #388e3c;
     }
     .status-indicator {
       display: flex;
       align-items: center;
       gap: 5px;
-      margin-top: 5px;
+      white-space: nowrap;
     }
     .dot {
       width: 10px;
       height: 10px;
       border-radius: 50%;
       background-color: #ccc;
+      flex-shrink: 0;
     }
     .dot.connected {
       background-color: #0f0;
@@ -56,19 +71,150 @@
     .dot.disconnected {
       background-color: #f00;
     }
+    .slider-container {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .slider-label {
+      display: flex;
+      justify-content: space-between;
+    }
+    select {
+      padding: 5px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .button-group {
+      display: flex;
+      gap: 10px;
+    }
+    .selected-text-container {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 10px;
+    }
+    .selected-text {
+      max-height: 80px;
+      overflow-y: auto;
+      background-color: #f5f5f5;
+      padding: 5px;
+      border-radius: 4px;
+      font-size: 12px;
+      word-break: break-word;
+      border: 1px solid #ddd;
+      scrollbar-width: thin;
+      scrollbar-color: #ccc #f5f5f5;
+    }
+    /* Custom scrollbar for Webkit browsers */
+    .selected-text::-webkit-scrollbar {
+      width: 8px;
+    }
+    .selected-text::-webkit-scrollbar-track {
+      background: #f5f5f5;
+      border-radius: 4px;
+    }
+    .selected-text::-webkit-scrollbar-thumb {
+      background-color: #ccc;
+      border-radius: 4px;
+    }
+    .text-controls {
+      display: flex;
+      gap: 10px;
+    }
+    .divider {
+      border-top: 1px solid #ccc;
+      margin: 10px 0;
+    }
+    .connection-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    .connect-group {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .port-field {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex: 1;
+    }
+    .port-field input {
+      width: 60px;
+      flex-shrink: 0;
+    }
+    .port-field label {
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h3>Edge TTS Client</h3>
-    <div class="port-container">
-      <label for="port">Server Port:</label>
-      <input type="number" id="port" value="7123" min="1" max="65535">
+    <div id="selected-text-section" class="selected-text-container" style="display:none;">
+      <div id="selected-text" class="selected-text"></div>
+      <div class="text-controls">
+        <button id="play-selected-btn" class="play">Play Selected</button>
+        <button id="stop-btn" class="stop">Stop</button>
+      </div>
     </div>
-    <button id="connect-btn">Connect</button>
-    <div class="status-indicator">
-      <div id="status-dot" class="dot disconnected"></div>
-      <span id="status-text">Disconnected</span>
+    
+    <div class="divider"></div>
+    
+    <!-- Voice Settings -->
+    <div class="port-container">
+      <label for="voice-select">Voice:</label>
+      <select id="voice-select"></select>
+    </div>
+    
+    <div class="slider-container">
+      <div class="slider-label">
+        <label for="pitch-slider">Pitch:</label>
+        <span id="pitch-value">1.0</span>
+      </div>
+      <input type="range" id="pitch-slider" min="0.5" max="2" value="1" step="0.1">
+    </div>
+    
+    <div class="slider-container">
+      <div class="slider-label">
+        <label for="rate-slider">Rate:</label>
+        <span id="rate-value">1.0</span>
+      </div>
+      <input type="range" id="rate-slider" min="0.5" max="2" value="1" step="0.1">
+    </div>
+    
+    <div class="slider-container">
+      <div class="slider-label">
+        <label for="volume-slider">Volume:</label>
+        <span id="volume-value">1.0</span>
+      </div>
+      <input type="range" id="volume-slider" min="0" max="1" value="1" step="0.1">
+    </div>
+    
+    <!-- Server Connection (Moved to bottom) -->
+    <div class="connection-container">
+      <div class="connect-group">
+        <button id="connect-btn">Connect</button>
+        
+        <div class="port-field">
+          <label for="port">Port:</label>
+          <input type="number" id="port" value="7123" min="1" max="65535">
+        </div>
+        
+        <div class="status-indicator">
+          <div id="status-dot" class="dot disconnected"></div>
+          <span id="status-text">Disconnected</span>
+        </div>
+      </div>
     </div>
   </div>
   <script src="popup.js"></script>

@@ -48,7 +48,19 @@ export type WebSocketMessage =
 export interface ExtensionStorage {
   port: number;
   connected: boolean;
+  selectedVoice?: string;
+  pitch?: number;
+  rate?: number;
+  volume?: number;
 }
 
 // Connection status
 export type ConnectionStatus = "connected" | "disconnected";
+
+// Voice settings
+export interface VoiceSettings {
+  selectedVoice: string;
+  pitch: number;
+  rate: number;
+  volume: number;
+}

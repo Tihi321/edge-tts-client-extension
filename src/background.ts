@@ -1,26 +1,49 @@
-import { WebSocketMessage, PlayMessage, ExtensionStorage, ConnectionStatus } from "./types";
+import {
+  WebSocketMessage,
+  PlayMessage,
+  ExtensionStorage,
+  ConnectionStatus,
+  VoiceSettings,
+} from "./types";
 
 // Default port
 const DEFAULT_PORT = 7123;
 
+// Default voice settings
+const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
+  selectedVoice: "Microsoft AndrewMultilingual Online (Natural) - English (United States)",
+  pitch: 1.0,
+  rate: 1.0,
+  volume: 1.0,
+};
+
+// Currently selected text storage
+let currentlySelectedText: string = "";
+
 // WebSocket client
 let websocket: WebSocket | null = null;
-
-// Track all TTS tool tabs
-let ttsTabs: Set<number> = new Set();
-
-// Active tab for sending commands
-let activeTabId: number | null = null;
-
-// Check if URL is the TTS tool
-const isTtsToolUrl = (url: string): boolean => {
-  return url.startsWith("https://webtools.tihomir-selak.from.hr/?tool=speak-it");
-};
 
 // Get stored port or default
 const getStoredPort = async (): Promise<number> => {
   const result = (await chrome.storage.local.get(["port"])) as Partial<ExtensionStorage>;
   return result.port || DEFAULT_PORT;
+};
+
+// Get stored voice settings
+const getVoiceSettings = async (): Promise<VoiceSettings> => {
+  const result = (await chrome.storage.local.get([
+    "selectedVoice",
+    "pitch",
+    "rate",
+    "volume",
+  ])) as Partial<ExtensionStorage>;
+
+  return {
+    selectedVoice: result.selectedVoice || DEFAULT_VOICE_SETTINGS.selectedVoice,
+    pitch: result.pitch || DEFAULT_VOICE_SETTINGS.pitch,
+    rate: result.rate || DEFAULT_VOICE_SETTINGS.rate,
+    volume: result.volume || DEFAULT_VOICE_SETTINGS.volume,
+  };
 };
 
 // Connect to WebSocket server
@@ -37,6 +60,7 @@ const connectToWebSocket = async (port: number): Promise<void> => {
 
     // WebSocket event handlers
     websocket.onopen = () => {
+      console.log("WebSocket connection opened");
       // Send identify message
       const identifyMessage = {
         type: "identify",
@@ -71,6 +95,7 @@ const connectToWebSocket = async (port: number): Promise<void> => {
         const message = JSON.parse(event.data) as WebSocketMessage;
 
         if (message.type === "play") {
+          console.log("Playing message:", message);
           handlePlayMessage(message as PlayMessage);
         }
       } catch (error) {
@@ -104,107 +129,217 @@ const updateConnectionStatus = (status: ConnectionStatus): void => {
     });
 };
 
-// Find the best tab to use for TTS
-const findBestTtsTab = async (): Promise<number | null> => {
-  // First try the active tab if it's a TTS tool tab
-  if (activeTabId && ttsTabs.has(activeTabId)) {
-    try {
-      // Check if tab still exists
-      await chrome.tabs.get(activeTabId);
-      return activeTabId;
-    } catch (e) {
-      // Tab no longer exists
-      ttsTabs.delete(activeTabId);
-      activeTabId = null;
-    }
-  }
-
-  // Then try any existing TTS tool tab
-  for (const tabId of ttsTabs) {
-    try {
-      await chrome.tabs.get(tabId);
-      activeTabId = tabId;
-      return tabId;
-    } catch (e) {
-      // Tab no longer exists
-      ttsTabs.delete(tabId);
-    }
-  }
-
-  // If no existing TTS tabs, create a new one
+// Create a tts content script in a service worker context
+const createTtsContentScript = async (): Promise<void> => {
+  // Check if document already exists
   try {
-    const tab = await chrome.tabs.create({
-      url: "https://webtools.tihomir-selak.from.hr/?tool=speak-it",
-      active: false, // Open in background
+    // Using any type to bypass TypeScript errors since these APIs might not be fully typed
+    const contexts = await (chrome.runtime as any).getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
     });
 
-    if (tab.id) {
-      ttsTabs.add(tab.id);
-      activeTabId = tab.id;
-      return tab.id;
+    if (contexts && contexts.length > 0) {
+      console.log("Offscreen document already exists");
+      return; // Document already exists
     }
-  } catch (e) {
-    console.error("Error creating new TTS tab:", e);
+  } catch (error) {
+    console.log("Error checking for existing offscreen contexts:", error);
   }
 
-  return null;
+  // Create a temporary offscreen document for audio playback
+  // This is required since service workers don't have access to Web Speech API
+  try {
+    await chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["AUDIO_PLAYBACK"],
+      justification: "Play TTS audio without requiring a visible tab",
+    });
+    console.log("Offscreen document created successfully");
+  } catch (error) {
+    // Document might already exist or creation failed
+    console.log("Offscreen document creation error:", error);
+  }
 };
 
-// Handle play message
+// Handle play message from websocket
 const handlePlayMessage = async (message: PlayMessage): Promise<void> => {
-  // Find a TTS tool tab to use
-  const tabId = await findBestTtsTab();
+  try {
+    // Get voice settings
+    const voiceSettings = await getVoiceSettings();
 
-  if (!tabId) {
-    console.error("No TTS tool tab available");
-    return;
+    // Play the text
+    await playText(message.value, voiceSettings);
+  } catch (error) {
+    console.error("Error handling TTS playback:", error);
   }
+};
+
+// Play text with TTS
+const playText = async (text: string, voiceSettings: VoiceSettings): Promise<void> => {
+  // Save as currently selected text for popup
+  currentlySelectedText = text;
+
+  // Notify popup of new text
+  chrome.runtime
+    .sendMessage({
+      action: "textSelected",
+      text: currentlySelectedText,
+    })
+    .catch(() => {
+      // Ignore errors when popup is closed
+    });
 
   try {
-    // Execute script in the tab to control the TTS tool
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (textToSpeak: string) => {
-        // Step 1: Stop current speaking
-        const stopButton = document.getElementById("stop-speaking");
-        if (stopButton) {
-          stopButton.dispatchEvent(new Event("click"));
-        }
+    // Ensure offscreen document exists
+    await createTtsContentScript();
 
-        // Step 2: Set text in the input field
-        const textArea = document.getElementById("input-text") as HTMLTextAreaElement;
-        if (textArea) {
-          textArea.value = textToSpeak;
-          textArea.dispatchEvent(new Event("input", { bubbles: true }));
-        }
+    // Wait a small amount of time to ensure document is ready
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-        // Step 3: Click speak button
-        setTimeout(() => {
-          const speakButton = document.getElementById("speak-it");
-          if (speakButton) {
-            speakButton.dispatchEvent(new Event("click"));
-          }
-        }, 200);
-      },
-      args: [message.value],
+    // Send message to offscreen document to speak text
+    const response = await sendMessageToOffscreenDocument({
+      action: "playTTS",
+      text: text,
+      voiceSettings,
+    });
+
+    console.log("TTS playback response:", response);
+  } catch (error) {
+    console.error("Error sending TTS message:", error);
+
+    // If the message fails, try recreating the document and retrying once
+    try {
+      console.log("Attempting to recreate offscreen document and retry...");
+      // Force close any existing documents
+      await closeOffscreenDocument();
+
+      // Wait a moment and create a new document
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await createTtsContentScript();
+
+      // Wait for document to initialize
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Try sending the message again
+      const retryResponse = await sendMessageToOffscreenDocument({
+        action: "playTTS",
+        text: text,
+        voiceSettings,
+      });
+
+      console.log("TTS retry response:", retryResponse);
+    } catch (retryError) {
+      console.error("Retry failed:", retryError);
+    }
+  }
+};
+
+// Helper to send messages to offscreen document with timeout
+const sendMessageToOffscreenDocument = async (message: any): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    // Set a timeout in case the message never responds
+    const timeoutId = setTimeout(() => {
+      reject(new Error("Message to offscreen document timed out"));
+    }, 2000);
+
+    chrome.runtime.sendMessage(message, (response) => {
+      clearTimeout(timeoutId);
+
+      // Check for error
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      resolve(response);
+    });
+  });
+};
+
+// Helper to close offscreen document
+const closeOffscreenDocument = async (): Promise<void> => {
+  try {
+    await sendMessageToOffscreenDocument({ action: "close" });
+  } catch (error) {
+    console.log("Error closing offscreen document (might not exist):", error);
+
+    // Try to force close by creating a document and then closing it
+    try {
+      await chrome.offscreen.createDocument({
+        url: "offscreen.html",
+        reasons: ["AUDIO_PLAYBACK"],
+        justification: "Temporary document for closure",
+      });
+
+      await sendMessageToOffscreenDocument({ action: "close" });
+    } catch (e) {
+      // Ignore errors in this cleanup attempt
+      console.log("Force close attempt result:", e);
+    }
+  }
+};
+
+// Stop TTS playback
+const stopTTS = async (): Promise<void> => {
+  try {
+    // Ensure offscreen document exists
+    await createTtsContentScript();
+
+    // Wait a small amount of time to ensure document is ready
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Send stop message to offscreen document
+    await sendMessageToOffscreenDocument({
+      action: "stopTTS",
     });
   } catch (error) {
-    console.error("Error executing script:", error);
+    console.error("Error stopping TTS playback:", error);
 
-    // Tab might be in a broken state, remove it from our list
-    ttsTabs.delete(tabId);
-    if (activeTabId === tabId) {
-      activeTabId = null;
+    // If stopping fails, try to recreate the document
+    try {
+      await closeOffscreenDocument();
+
+      // Creating a new document will automatically stop any previous speech
+      await createTtsContentScript();
+    } catch (retryError) {
+      console.error("Failed to recreate document after stop failure:", retryError);
     }
-
-    // Try again with a different tab
-    handlePlayMessage(message);
   }
 };
 
-// Handle connect request from popup
+// Handle context menu creation
+const createContextMenu = (): void => {
+  // Remove existing items first to prevent duplicates
+  chrome.contextMenus.removeAll(() => {
+    // Create parent item
+    chrome.contextMenus.create({
+      id: "text-to-speech",
+      title: "Text-to-Speech",
+      contexts: ["selection"],
+    });
+
+    // Create play item
+    chrome.contextMenus.create({
+      id: "play-text",
+      parentId: "text-to-speech",
+      title: "Play Selected Text",
+      contexts: ["selection"],
+    });
+
+    // Create stop item
+    chrome.contextMenus.create({
+      id: "stop-playback",
+      parentId: "text-to-speech",
+      title: "Stop Playback",
+      contexts: ["selection"],
+    });
+  });
+};
+
+// Handle message processing
 chrome.runtime.onMessage.addListener(
   (message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+    // Connect to websocket
     if (message.action === "connect") {
       const port = message.port || DEFAULT_PORT;
 
@@ -218,6 +353,7 @@ chrome.runtime.onMessage.addListener(
       return true; // Keep the messaging channel open for async response
     }
 
+    // Get connection status
     if (message.action === "getStatus") {
       chrome.storage.local.get(["connected"], (result) => {
         const isConnected = result.connected || false;
@@ -225,66 +361,85 @@ chrome.runtime.onMessage.addListener(
       });
       return true; // Keep the messaging channel open for async response
     }
+
+    // Stop TTS playback
+    if (message.action === "stopTTS") {
+      stopTTS();
+      sendResponse({ success: true });
+      return true;
+    }
+
+    // Play text with TTS
+    if (message.action === "playSelectedText") {
+      if (message.text) {
+        // Use provided text
+        getVoiceSettings().then((voiceSettings) => {
+          playText(message.text, voiceSettings);
+          sendResponse({ success: true });
+        });
+      } else if (currentlySelectedText) {
+        // Use currently stored text
+        getVoiceSettings().then((voiceSettings) => {
+          playText(currentlySelectedText, voiceSettings);
+          sendResponse({ success: true });
+        });
+      } else {
+        sendResponse({ success: false, error: "No text available" });
+      }
+      return true;
+    }
+
+    // Get currently selected text
+    if (message.action === "getSelectedText") {
+      sendResponse({ text: currentlySelectedText });
+      return true;
+    }
+
+    // Handle selected text from content script
+    if (message.action === "textSelected" && message.text) {
+      currentlySelectedText = message.text;
+
+      // Notify popup of new selected text
+      chrome.runtime
+        .sendMessage({
+          action: "textSelected",
+          text: currentlySelectedText,
+        })
+        .catch(() => {
+          // Ignore errors if popup is not open
+        });
+
+      sendResponse({ success: true });
+    }
   }
 );
 
-// Listen for tab URL changes
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.url && isTtsToolUrl(changeInfo.url)) {
-    ttsTabs.add(tabId);
-    // If we don't have an active tab yet, use this one
-    if (activeTabId === null) {
-      activeTabId = tabId;
-    }
-  }
-});
+// Handle context menu clicks
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "play-text" && info.selectionText) {
+    // Save selected text
+    currentlySelectedText = info.selectionText;
 
-// Listen for tab closures
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (ttsTabs.has(tabId)) {
-    ttsTabs.delete(tabId);
-
-    // If this was the active tab, clear it
-    if (activeTabId === tabId) {
-      activeTabId = null;
-    }
+    // Get voice settings and play text
+    getVoiceSettings().then((voiceSettings) => {
+      playText(info.selectionText!, voiceSettings);
+    });
+  } else if (info.menuItemId === "stop-playback") {
+    // Stop playback
+    stopTTS();
   }
 });
 
 // Initialize
 (async () => {
+  // Create TTS content script
+  await createTtsContentScript();
+
+  // Create context menu
+  createContextMenu();
+
   // Get stored port
   const port = await getStoredPort();
-
-  // Find existing TTS tool tabs
-  const tabs = await chrome.tabs.query({});
-
-  for (const tab of tabs) {
-    if (tab.url && isTtsToolUrl(tab.url) && tab.id) {
-      ttsTabs.add(tab.id);
-      // Use the first one found as active
-      if (activeTabId === null) {
-        activeTabId = tab.id;
-      }
-    }
-  }
-
-  // If no TTS tabs found, create one in the background
-  if (ttsTabs.size === 0) {
-    try {
-      const tab = await chrome.tabs.create({
-        url: "https://webtools.tihomir-selak.from.hr/?tool=speak-it",
-        active: false, // Open in background
-      });
-
-      if (tab.id) {
-        ttsTabs.add(tab.id);
-        activeTabId = tab.id;
-      }
-    } catch (e) {
-      console.error("Error creating TTS tab:", e);
-    }
-  }
 
   // Connect to WebSocket server
   connectToWebSocket(port);
